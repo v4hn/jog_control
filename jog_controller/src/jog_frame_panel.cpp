@@ -1,8 +1,10 @@
+#include <regex>
 #include <boost/thread.hpp>
 #include <rviz/config.h>
 #include <rviz/visualization_manager.h>
 #include <ros/package.h>
-#include <tf/transform_listener.h>
+#include <tf2/buffer_core.h>
+#include <tf2/utils.h>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QSignalMapper>
@@ -191,23 +193,21 @@ void JogFramePanel::onInitialize()
 
 void JogFramePanel::update()
 {
-  tf::TransformListener* tf = vis_manager_->getTFClient();
-  tf::StampedTransform transform;
+  auto tf = vis_manager_->getTF2BufferPtr();
+  geometry_msgs::TransformStamped transform;
   try{
-    tf->lookupTransform(frame_id_, target_link_id_, ros::Time(0), transform);
+    transform = tf->lookupTransform(target_link_id_, frame_id_, ros::Time(0));
   }
-  catch (tf::TransformException ex){
+  catch (tf2::TransformException& ex){
     ROS_ERROR("%s",ex.what());
-  }  
-  fillNumericLabel(pos_x_text_, transform.getOrigin().x());
-  fillNumericLabel(pos_y_text_, transform.getOrigin().y());
-  fillNumericLabel(pos_z_text_, transform.getOrigin().z());
+  }
+  fillNumericLabel(pos_x_text_, transform.transform.translation.x);
+  fillNumericLabel(pos_y_text_, transform.transform.translation.y);
+  fillNumericLabel(pos_z_text_, transform.transform.translation.z);
 
   // RPY
-  tf::Quaternion q = transform.getRotation();
-  tf::Matrix3x3 m(q);
   double roll, pitch, yaw;
-  m.getRPY(roll, pitch, yaw);
+  tf2::getEulerYPR(transform.transform.rotation, yaw, pitch, roll);
   fillNumericLabel(rot_x_text_, roll);
   fillNumericLabel(rot_y_text_, pitch);
   fillNumericLabel(rot_z_text_, yaw);
@@ -232,7 +232,13 @@ void JogFramePanel::updateFrame()
 {
   typedef std::vector<std::string> V_string;
   V_string frames;
-  vis_manager_->getTFClient()->getFrameStrings( frames );
+  std::string frames_yaml{ vis_manager_->getTF2BufferPtr()->allFramesAsYAML() };
+  std::regex frame_name_regex{ "^([^ ]*):$" };
+  for(auto match = std::sregex_iterator(frames_yaml.begin(), frames_yaml.end(), frame_name_regex);
+      match != std::sregex_iterator();
+      ++match){
+    frames.push_back((*match)[1]);
+  }
   std::sort(frames.begin(), frames.end());
   frame_cbox_->clear();
   for (V_string::iterator it = frames.begin(); it != frames.end(); ++it )
